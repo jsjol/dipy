@@ -768,7 +768,10 @@ def test_eig_from_lo_tri():
     dmfit = dm.fit(S)
 
     lo_tri = lower_triangular(dmfit.quadratic_form)
-    assert_array_almost_equal(dti.eig_from_lo_tri(lo_tri), dmfit.model_params)
+    # Compare eigenvalues
+    assert_array_almost_equal(dti.eig_from_lo_tri(lo_tri)[..., :3], dmfit.model_params[..., :3])
+    # Compare square of eigenvectors, because of sign ambiguity
+    assert_array_almost_equal(dti.eig_from_lo_tri(lo_tri)[..., 3:12] ** 2, dmfit.model_params[..., 3:12] ** 2)
 
 def test_min_signal_alone():
     fdata, fbvals, fbvecs = get_data()
