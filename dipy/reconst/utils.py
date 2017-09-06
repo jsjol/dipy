@@ -47,7 +47,8 @@ def dki_design_matrix(gtab):
 
     return B
 
-def probabilistic_least_squares(design_matrix, y, regularization_matrix=None, n_posterior_samples=None):
+
+def probabilistic_least_squares(design_matrix, y, regularization_matrix=None, return_posterior_precision=False):
     # Solve least-squares problem on the form
     # design_matrix * coef = y
 
@@ -68,23 +69,35 @@ def probabilistic_least_squares(design_matrix, y, regularization_matrix=None, n_
     residual_variance = (np.sum(residuals ** 2, axis=-1) /
                          np.sum(residual_matrix ** 2, axis=(-1, -2)))
 
-    if n_posterior_samples is None:
+    if not return_posterior_precision:
         return coef_posterior_mean, residual_variance
     else:
         coef_posterior_mean = np.atleast_2d(coef_posterior_mean)
         n_voxels, n_coefs = coef_posterior_mean.shape
+        coef_posterior_mean = np.squeeze(coef_posterior_mean)
+
         coef_posterior_precision = unscaled_posterior_precision / residual_variance
         coef_posterior_precision = coef_posterior_precision.reshape(n_voxels, n_coefs, n_coefs)
-        samples = np.zeros((n_voxels, n_coefs, n_posterior_samples))
 
-        # Loop over voxels and draw samples for each
-        for i in range(n_voxels):
-            standard_normal_samples = np.random.randn(n_coefs, n_posterior_samples)
+        coef_posterior_precision = np.squeeze(coef_posterior_precision)
 
-            L = np.linalg.cholesky(coef_posterior_precision[i, :, :])
-            samples[i, :, :] = (coef_posterior_mean[i, :, None] +
-                                np.linalg.solve(L, standard_normal_samples))
+        return coef_posterior_mean, residual_variance, coef_posterior_precision
 
-        samples = np.squeeze(samples)
 
-        return samples, residual_variance
+def sample_coef_posterior(mean, precision, n_samples):
+    mean = np.atleast_2d(mean)
+    n_voxels, n_coefs = mean.shape
+    precision = precision.reshape(n_voxels, n_coefs, n_coefs)
+    samples = np.zeros((n_voxels, n_coefs, n_samples))
+
+    # Loop over voxels and draw samples for each
+    for i in range(n_voxels):
+        standard_normal_samples = np.random.randn(n_coefs, n_samples)
+
+        L = np.linalg.cholesky(precision[i, :, :])
+        samples[i, :, :] = (mean[i, :, None] +
+                            np.linalg.solve(L, standard_normal_samples))
+
+    samples = np.squeeze(samples)
+
+    return samples
