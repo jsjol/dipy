@@ -781,17 +781,7 @@ def test_mapmri_residual_variance(radial_order=6):
                            laplacian_weighting=0.02,
                            anisotropic_scaling=anisotropic)
         mapfit = mapm.fit(S)
-        posterior_mean = mapfit.mapmri_coeff
-        assert(np.isscalar(mapfit.residual_variance))
-
-        mapm = MapmriModel(gtab, radial_order=radial_order,
-                           laplacian_weighting=0.02,
-                           anisotropic_scaling=anisotropic,
-                           sample_coefficients=True)
-        mapfit = mapm.fit(S)
-        assert_array_almost_equal(mapfit.mapmri_coeff.shape, posterior_mean.shape)
-        # Test that the sample from the posterior is not identical to the posterior mean
-        np.testing.assert_raises(AssertionError, assert_array_almost_equal, mapfit.mapmri_coeff, posterior_mean)
+        assert(np.isscalar(mapfit.residual_variance) or len(mapfit.residual_variance) == 1)
 
 
 def test_mapmri_odf(radial_order=6):
