@@ -6,8 +6,10 @@ import numpy as np
 from dipy.reconst.recspeed import (adj_to_countarrs,
                                    argmax_from_countarrs)
 from dipy.reconst.utils import (probabilistic_least_squares,
+                                compute_S,
                                 sample_multivariate_normal,
-                                sample_multivariate_t)
+                                sample_multivariate_t,
+                                percentiles_of_function)
 
 from nose.tools import assert_true, assert_false, \
      assert_equal, assert_raises
@@ -15,6 +17,8 @@ from nose.tools import assert_true, assert_false, \
 from numpy.testing import (assert_array_equal,
                            assert_array_almost_equal,
                            assert_almost_equal)
+
+from scipy.stats import t
 
 
 def test_probabilistic_least_squares():
@@ -53,29 +57,48 @@ def test_probabilistic_least_squares():
     A = np.column_stack((x, x ** 2))
     variance_ground_truth = 0.1
     y_noisy = np.dot(A, coef_ground_truth) + np.sqrt(variance_ground_truth) * np.random.randn(n_x)
-    posterior_mean, uncertainty_quantities, posterior_precision = \
-        probabilistic_least_squares(A, y_noisy, return_posterior_precision=True)
+    coef, uncertainty_quantities = probabilistic_least_squares(A, y_noisy)
+    assert_array_almost_equal(coef, coef_ground_truth, decimal=3)
     assert_almost_equal(uncertainty_quantities.residual_variance, variance_ground_truth, decimal=2)
-    assert_array_almost_equal(posterior_precision, np.dot(A.T, A) / uncertainty_quantities.residual_variance)
 
-def test_sample_posterior():
+
+def test_S():
+    A = np.array([[1, 0], [1, 1], [1, 2]])
+    regularization_matrix = np.arange(4).reshape(2, 2)
+
+    out = compute_S(A)
+    out_expected = np.dot(A.T, A)
+    assert_array_almost_equal(out, out_expected)
+
+    out = compute_S(
+        A, regularization_matrix=regularization_matrix)
+    out_expected = np.dot(A.T, A) + regularization_matrix
+    assert_array_almost_equal(out, out_expected)
+
+
+def test_sample_multivariate_normal():
     np.random.seed(0)
 
     mean = np.array([1, 2])
     n_coefs = len(mean)
     precision = np.array([[10, 1], [1, 20]])
+    covariance = np.linalg.inv(precision)
 
-    # Test that sample mean matches posterior mean
-    n_samples = 1e5
-    samples = sample_multivariate_normal(mean, precision, n_samples)
-    samples_mean = np.mean(samples, -1, keepdims=False)
-    assert_array_almost_equal(samples_mean, mean, decimal=3)
+    for using_precision in [True, False]:
+        # Test that sample mean matches posterior mean
+        n_samples = 1e6
+        if using_precision:
+            samples = sample_multivariate_normal(mean, precision, n_samples, use_precision=using_precision)
+        else:
+            samples = sample_multivariate_normal(mean, covariance, n_samples, use_precision=using_precision)
+        samples_mean = np.mean(samples, -1, keepdims=False)
+        assert_array_almost_equal(samples_mean, mean, decimal=3)
 
-    # Test that sample covariance matches posterior variance
-    samples_centered = samples - samples_mean[:, None]
-    sample_covariance = (1/(n_samples - 1) *
-                         np.dot(samples_centered, samples_centered.T))
-    assert (np.linalg.norm(np.dot(sample_covariance, precision) - np.eye(n_coefs)) < 0.05)
+        # Test that sample covariance matches posterior variance
+        samples_centered = samples - samples_mean[:, None]
+        sample_covariance = (1/(n_samples - 1) *
+                             np.dot(samples_centered, samples_centered.T))
+        assert (np.linalg.norm(np.dot(sample_covariance, precision) - np.eye(n_coefs)) < 0.005)
 
 
 def test_sample_multivariate_t():
@@ -84,20 +107,65 @@ def test_sample_multivariate_t():
     mean = np.array([1, 2])
     n_coefs = len(mean)
     precision = np.array([[10, 1], [1, 20]])
+    correlation = np.linalg.inv(precision)
     df = 5 # Note: this is pretty far from a Gaussian
 
-    # Test that sample mean matches theoretical mean
-    n_samples = 1e5
-    samples = sample_multivariate_t(mean, precision,
-                                    df, n_samples=n_samples)
-    samples_mean = np.mean(samples, -1, keepdims=False)
-    assert_array_almost_equal(samples_mean, mean, decimal=3)
+    for using_precision in [True, False]:
+        # Test that sample mean matches theoretical mean
+        n_samples = 1e6
+        if using_precision:
+            samples = sample_multivariate_t(mean, precision,
+                                            df, n_samples=n_samples,
+                                            use_precision=using_precision)
+        else:
+            samples = sample_multivariate_t(mean, correlation,
+                                            df, n_samples=n_samples,
+                                            use_precision=using_precision)
+        samples_mean = np.mean(samples, -1, keepdims=False)
+        assert_array_almost_equal(samples_mean, mean, decimal=3)
 
-    # Test that sample covariance matches theoretical variance
-    samples_centered = samples - samples_mean[:, None]
-    sample_covariance = (1/(n_samples - 1) *
-                         np.dot(samples_centered, samples_centered.T))
-    assert (np.linalg.norm(np.dot(sample_covariance, (df - 2)/df * precision) - np.eye(n_coefs)) < 0.05)
+        # Test that sample covariance matches theoretical variance
+        samples_centered = samples - samples_mean[:, None]
+        sample_covariance = (1/(n_samples - 1) *
+                             np.dot(samples_centered, samples_centered.T))
+        #assert (np.linalg.norm(np.dot(sample_covariance, (df - 2)/df * precision) - np.eye(n_coefs)) < 0.005)
+        assert (np.linalg.norm(sample_covariance - df/(df - 2) * correlation) < 0.001)
+
+
+def test_percentiles():
+    np.random.seed(0)
+
+    A = np.array((2, 3)).reshape(1, 2)
+    b = 1
+    probabilities = np.array((0.1, 0.25, 0.5, 0.75, 0.9))
+
+    def affine_function(coeff):
+        coeff = np.atleast_2d(coeff)
+        return np.dot(A, coeff.T) + b
+
+    mean = np.array([1, 2])
+
+    precision = np.array([[10, 1], [1, 20]])
+    correlation = np.linalg.inv(precision)
+    df = 5
+
+    function_mean = np.dot(A, mean) + b
+    function_scale = np.sqrt(np.dot(np.dot(A, correlation), A.T))
+    function_df = df
+    expected_quantiles = t.ppf(probabilities, function_df, loc=function_mean, scale=function_scale)
+
+    n_samples = 1e6
+    for using_precision in [True, False]:
+        if using_precision:
+            observed_quantiles = percentiles_of_function(
+                affine_function, mean, precision, df, probabilities=probabilities,
+                n_samples=n_samples, use_precision=using_precision)
+        else:
+            observed_quantiles = percentiles_of_function(
+                affine_function, mean, correlation, df, probabilities=probabilities,
+                n_samples=n_samples, use_precision=using_precision)
+
+        assert_array_almost_equal(observed_quantiles, np.squeeze(expected_quantiles), 2)
 
 
 def test_adj_countarrs():

@@ -415,6 +415,7 @@ def test_mapmri_metrics_anisotropic(radial_order=6):
     assert_almost_equal(mapfit.rtap(), rtap_gt, 5)
     assert_almost_equal(mapfit.rtpp(), rtpp_gt, 5)
     assert_almost_equal(mapfit.rtop(), rtop_gt, 5)
+    assert_almost_equal(np.dot(mapfit.rtop_matrix, mapfit.mapmri_coeff), rtop_gt, 5)
     assert_almost_equal(mapfit.ng(), 0., 5)
     assert_almost_equal(mapfit.ng_parallel(), 0., 5)
     assert_almost_equal(mapfit.ng_perpendicular(), 0., 5)
@@ -452,6 +453,7 @@ def test_mapmri_metrics_isotropic(radial_order=6):
     assert_almost_equal(mapfit.rtap(), rtap_gt, 5)
     assert_almost_equal(mapfit.rtpp(), rtpp_gt, 5)
     assert_almost_equal(mapfit.rtop(), rtop_gt, 4)
+    assert_almost_equal(np.dot(mapfit.rtop_matrix, mapfit.mapmri_coeff), rtop_gt, 4)
     assert_almost_equal(mapfit.msd(), msd_gt, 5)
     assert_almost_equal(mapfit.qiv(), qiv_gt, 5)
 
@@ -801,6 +803,8 @@ def test_mapmri_odf(radial_order=6):
     sphere2 = create_unit_sphere(5)
     mapfit = mapmod.fit(data)
     odf = mapfit.odf(sphere)
+    odf_matrix = mapfit.odf_matrix(sphere)
+    assert_array_almost_equal(odf, np.dot(odf_matrix, mapfit.mapmri_coeff))
 
     directions, _, _ = peak_directions(odf, sphere, .35, 25)
     assert_equal(len(directions), 2)
